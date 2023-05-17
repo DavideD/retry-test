@@ -22,7 +22,6 @@ import jakarta.inject.Inject;
 @ApplicationScoped
 public class SchedulerService {
 
-	@WithSession
 	public Uni<Void> retrieveDataAndSaveInLocalDB() {
 		final AtomicInteger counter = new AtomicInteger();
 		return Uni.createFrom()
@@ -55,11 +54,13 @@ public class SchedulerService {
 		return new TestEntity();
 	}
 
+	@WithSession
 	public Uni<List<TestEntity>> getTestEntities() {
 		Log.info( "Listing all existing entities" );
 		return TestEntity.listAll();
 	}
 
+	@WithTransaction
 	public Uni<Void> persistEntity(TestEntity testEntity) {
 		Log.info( "Persisting: " + testEntity );
 		return TestEntity.persist( testEntity );
