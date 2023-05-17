@@ -1,12 +1,19 @@
 package org.acme;
 
-import io.quarkus.hibernate.reactive.panache.PanacheEntityBase;
-import io.quarkus.hibernate.reactive.panache.common.WithSession;
-import io.quarkus.logging.Log;
-import io.smallrye.mutiny.Uni;
-import jakarta.enterprise.context.ApplicationScoped;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.hibernate.reactive.mutiny.Mutiny;
+
+import io.quarkus.hibernate.reactive.panache.common.WithSession;
+import io.quarkus.hibernate.reactive.panache.common.WithTransaction;
+import io.quarkus.logging.Log;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.Context;
+import io.vertx.core.Vertx;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 
 /**
  * @author Sławomir Feliks
@@ -15,44 +22,46 @@ import java.util.List;
 @ApplicationScoped
 public class SchedulerService {
 
+	@WithSession
+	public Uni<Void> retrieveDataAndSaveInLocalDB() {
+		final AtomicInteger counter = new AtomicInteger();
+		return Uni.createFrom()
+				// This will throw an exception a couple of times to simulate an error
+				.deferred( () -> Uni.createFrom().item( this.somethingDeferred( counter ) ) )
+				.invoke( () -> Log.info( "Detached object created" ) )
+				.chain( testEntity -> getTestEntities()
+						.map( listAll -> {
+							Log.info( "Existing entities: " + listAll );
+							return testEntity;
+						} )
+				)
+				.onFailure()
+				.retry()
+				.withBackOff( Duration.ofSeconds( 3 ), Duration.ofMinutes( 5 ) )
+				.atMost( 3 )
+				.call( this::persistEntity )
+				.invoke( testEntity -> Log.info( testEntity + " persisted!" ) )
+				.replaceWithVoid();
+	}
 
+	private TestEntity somethingDeferred(AtomicInteger counter) {
+		int value = counter.incrementAndGet();
+		// Fail the first few times
+		if ( value < 3 ) {
+			Log.error( "Error " + value );
+			throw new RuntimeException( "Not ready!" );
+		}
+		Log.info( "Creating TestEntity" );
+		return new TestEntity();
+	}
 
-  @WithSession
-  public Uni<Void> retrieveDataAndSaveInLocalDB() {
-    final String aa = "dsadsdas";
-    return Uni.createFrom()
-        .deferred(() -> Uni.createFrom()
-            .item(this::somethingDeferred))
-        .map(a -> getTestEntities())
-        .invoke(a -> {
-          if (true) throw new RuntimeException("Test Runtime");})
-        .onFailure()
-        .retry()
-        .withBackOff(Duration.ofSeconds(3), Duration.ofMinutes(5))
-        .atMost(3)
-        .map(a -> a)
-        .flatMap(TestEntity::persist)
-        .invoke(() -> Log.info(aa))
-        .invoke(() -> Log.info("logged info"));
-  }
+	public Uni<List<TestEntity>> getTestEntities() {
+		Log.info( "Listing all existing entities" );
+		return TestEntity.listAll();
+	}
 
-  private Object somethingDeferred()  {
-    try {
-      Log.info("Before sleep");
-      Thread.sleep(1000);
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
-    }
-    return new TestEntity();
-  }
-
-  private Uni<List<TestEntity>> getTestEntities() {
-    Log.info("Trying to connect to db");
-    Uni<List<TestEntity>> listUni = TestEntity.listAll();
-    TestEntity.persist(listUni);
-    return listUni;
-  }
-
-
-
+	public Uni<Void> persistEntity(TestEntity testEntity) {
+		Log.info( "Persisting: " + testEntity );
+		return TestEntity.persist( testEntity );
+	}
 }
